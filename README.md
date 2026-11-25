@@ -8,11 +8,12 @@ The initial product targets one AMD Radeon RX 9070 (16 GB VRAM) on native Linux 
 
 The first delivery is a generic inference foundation. Qwen3.8-Flash-Next is the first model adapter after the core contracts and memory lifecycle are validated.
 
-## Context documents
+## Context and design documents
 
 - [Product requirements](docs/PRODUCT_REQUIREMENTS.md) — user value, Pareto priorities, scope and success criteria.
 - [Technical requirements](docs/TECHNICAL_REQUIREMENTS.md) — functional/non-functional requirements, Rust/FFI constraints and verification.
 - [Reference architecture](docs/REFERENCE_ARCHITECTURE.md) — subsystem boundaries, model adapters, tiered memory and execution flow.
+- [Phase 1 MVP design](docs/PHASE_1_MVP_DESIGN.md) — implementation-level design, contracts, native boundary, execution flow, testing, work packages and exit criteria.
 
 ## Core architectural direction
 
@@ -25,8 +26,8 @@ The first delivery is a generic inference foundation. Qwen3.8-Flash-Next is the 
 
 ## Current status
 
-Documentation baseline only. No inference engine implementation or performance claim is implied by these documents. See the technical requirements for unresolved source/API and model-compatibility questions.
+Documentation baseline only. No inference engine implementation or performance claim is implied by these documents. See the technical requirements and Phase 1 MVP design for unresolved source/API and model-compatibility questions.
 
 ## Development principle
 
-Apply the Pareto principle in every phase: build the smallest set of capabilities that creates the greatest user value. Preserve correctness and observability before optimizing.
+Apply the Pareto principle in every phase: build the smallest set of capabilities that creates the greatest value for users. Preserve correctness and observability before optimizing.
