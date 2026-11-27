@@ -69,3 +69,30 @@ Target runtime: `no_std`, no libc, no OS imports, no GPU/driver/SDK.
 Host tools: may use `std`, Python and ordinary filesystem/process APIs. Keep them in a separate workspace package and never link them into the target image.
 
 QEMU validates boot, memory contracts and basic inference behavior. Physical AMD and Intel hardware validation is required before declaring platform support.
+
+## 7. Development VM and execution environments
+
+The developer's existing Ubuntu 26.04 installation remains the host OS. Use KVM + QEMU + libvirt; do not replace the host OS, alter its bootloader or repartition its disks.
+
+Maintain two distinct test paths:
+
+1. **Linux development VM:** Ubuntu Server guest, used for compiling, hosted reference execution, model tooling and performance-kernel development.
+2. **Freestanding QEMU/KVM guest:** launch the Limine-based BareMetalInfer image directly from the Ubuntu host. The guest boots BareMetalInfer without Linux.
+
+Do not nest QEMU inside the development VM initially. Host-launched QEMU avoids requiring nested SVM and simplifies CPU feature exposure.
+
+Recommended starting profile:
+- Q35 machine type and OVMF UEFI firmware.
+- CPU mode `host-passthrough`.
+- 6 vCPUs for interactive development; 8 for dedicated benchmarks.
+- 24–32 GiB RAM and 100 GiB QCOW2 disk.
+- NAT networking for setup; disable network activity during controlled benchmark runs.
+- Inspect actual topology before applying vCPU pinning; leave host capacity available.
+
+Install the toolchain in the guest, pin Rust via rustup/toolchain configuration, and keep host-side packer/reference tools separate from the `no_std` target.
+
+CPU feature exposure must be checked inside each guest. Runtime dispatch still requires CPUID bounds checks and OSXSAVE/XCR0 validation before AVX-family instructions. Do not assume host-passthrough exposes every host feature under all hypervisor configurations.
+
+QEMU/KVM is suitable for boot, memory, exception, SIMD correctness and inference integration tests. It is not physical bare-metal validation: guest scheduling, interrupts, firmware, cache and memory behavior are virtualized. Keep three benchmark labels distinct: hosted Linux VM, freestanding QEMU/KVM guest and physical bare metal.
+
+See [DEVELOPMENT_VM_SETUP.md](DEVELOPMENT_VM_SETUP.md) for installation, configuration, benchmark policy and acceptance checklist.
