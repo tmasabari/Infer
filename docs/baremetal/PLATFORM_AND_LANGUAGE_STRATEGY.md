@@ -96,3 +96,23 @@ CPU feature exposure must be checked inside each guest. Runtime dispatch still r
 QEMU/KVM is suitable for boot, memory, exception, SIMD correctness and inference integration tests. It is not physical bare-metal validation: guest scheduling, interrupts, firmware, cache and memory behavior are virtualized. Keep three benchmark labels distinct: hosted Linux VM, freestanding QEMU/KVM guest and physical bare metal.
 
 See [DEVELOPMENT_VM_SETUP.md](DEVELOPMENT_VM_SETUP.md) for installation, configuration, benchmark policy and acceptance checklist.
+
+
+## 8. Upstream reuse decision: assembly platform, Rust inference
+
+The detailed decision is in [ARCHITECTURE_COMPARISON_AND_DECISION.md](ARCHITECTURE_COMPARISON_AND_DECISION.md).
+
+- Use `alesha-pro/llm.asm` as a **platform reference**, not as the Qwen3.5 inference implementation. Reuse the design patterns for boot handoff, early x86-64 setup, memory map, serial diagnostics, CPUID/SIMD setup and later ACPI/APIC SMP.
+- Use `Danmoreng/qwen35-cpu` as the **Qwen3.5 model and quantization reference** and hosted oracle. It is a hosted C++20 runtime with OS standard-library dependencies; do not link it directly into the freestanding image.
+- Keep Rust `no_std` as the primary target language. Port required model semantics and measured hot kernels into Rust/core intrinsics. NASM or inline assembly remains limited to boot/interrupt/AP startup and kernels whose measured benefit justifies the maintenance cost.
+- Do not adopt Qwen3-0.6B Q8_0 kernels as a substitute for Qwen3.5-0.8B H128/Q4-G32-DOT4. Their model architecture and quantization are different.
+- Use a hosted build of the same Rust inference contracts plus the upstream Qwen3.5 reference for differential tests. Hosted facilities must remain in a separate target/build boundary.
+
+### 8.1 ISA policy for the Ryzen 7 9700X
+
+The target must detect CPUID features and validate OSXSAVE/XCR0 state at runtime. AVX2/FMA is a supported optimization path; AVX-512 subsets including VNNI are optional paths only when the guest or physical CPU exposes the exact required features. Benchmark AVX2 and AVX-512 per kernel: do not assume the widest vector path always wins. Keep scalar fallback and test forced feature masks.
+
+### 8.2 Bootloader policy
+
+Do not write a general-purpose OS or custom bootloader for the MVP. Select and validate one existing standard boot protocol and normalize it into `BootInfo`. The direct UEFI/firmware path remains a later adapter. Resolve the current documentation's Limine/Multiboot2 wording to one concrete loader in a small boot spike before freezing build scripts.
+
