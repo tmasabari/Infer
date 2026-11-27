@@ -1,3 +1,5 @@
+ > **Scope note:** This engineering plan describes the separate RX 9070 / Qwen3.8 / ROCm-HIP Infer product. It is not the implementation authority for the CPU-only `BareMetalInfer` workstream. On the `BareMetalInfer` branch, use [`docs/baremetal/ARCHITECTURE_COMPARISON_AND_DECISION.md`](../baremetal/ARCHITECTURE_COMPARISON_AND_DECISION.md), [`BAREMETAL_INFER_ARCHITECTURE.md`](../baremetal/BAREMETAL_INFER_ARCHITECTURE.md), the bare-metal roadmap and work packages as the authoritative context. Keep the two projects' hardware, runtime and acceptance criteria separate.
+
 # Infer — Engineering Execution Specification
 
 **Status:** Proposed implementation baseline  
