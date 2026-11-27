@@ -156,3 +156,17 @@ Every optimized kernel has a scalar reference and differential tests for absolut
 6. Physical addresses do not cross into model/inference APIs.
 7. The smallest working model is delivered before framework generalization.
 8. No optimization is accepted without reproducible end-to-end measurements.
+
+## 12. Development and validation environment
+
+Development must not require changing the developer's existing host OS or boot configuration. The reference development environment is an Ubuntu 26.04 host using KVM, QEMU and libvirt, with an isolated Ubuntu Server development VM. See [DEVELOPMENT_VM_SETUP.md](DEVELOPMENT_VM_SETUP.md) for the reproducible setup.
+
+Use two execution modes:
+- Hosted Linux backend in the development VM for rapid development, reference comparisons and kernel benchmarking.
+- Freestanding BareMetalInfer image launched directly by host QEMU/KVM, with no guest Linux OS, for boot and runtime validation.
+
+The Linux backend is a development adapter, not a dependency of the freestanding inference core. Keep OS-specific allocation, timing, threading and console implementations behind narrow platform interfaces. The freestanding target must continue to build as `no_std` with no libc, syscall, POSIX or Linux runtime dependency.
+
+Initial VM profile: host CPU passthrough, 6 vCPUs for development and 8 vCPUs for dedicated benchmarks, 24–32 GiB guest RAM, 100 GiB QCOW2 disk, Q35 and OVMF. Tune vCPU pinning only after inspecting actual host CPU topology. Keep host resources available and do not assume VM CPU pinning makes execution physically bare metal.
+
+All reports must distinguish Linux-guest, freestanding-QEMU/KVM and physical bare-metal results. QEMU/KVM validates the freestanding guest and CPU feature paths but does not provide direct physical motherboard, memory-controller, firmware or interrupt-controller access.
