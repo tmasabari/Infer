@@ -113,3 +113,29 @@ Build a minimal Linux-hosted adapter for the shared inference core so model load
 
 **Exit:** the same core numerical and model tests can run in hosted test mode and in freestanding/QEMU mode. Benchmark output identifies the execution environment explicitly.
 
+
+## Architecture decision update — 2026-11-27
+
+The detailed source comparison and rationale are maintained in [ARCHITECTURE_COMPARISON_AND_DECISION.md](ARCHITECTURE_COMPARISON_AND_DECISION.md). This section clarifies the roadmap above where its generic "small dense decoder" wording is insufficient.
+
+### Primary model target
+
+The intended performance MVP is **Qwen3.5-0.8B with H128/Q4-G32-DOT4 quantization**, using the exact validated artifact and tokenizer. The currently evaluated artifact is approximately 425 MB. Qwen3-0.6B Q8_0 from `llm.asm` may be used as an optional boot/platform smoke fixture, but it is not the primary model target.
+
+### Updated implementation sequence
+
+1. **Environment and source audit:** establish hosted Qwen3.5 reference execution, pin source revisions and licenses, hash the model artifact, and capture a matched baseline.
+2. **Freestanding platform skeleton:** keep the existing Rust `no_std` plan; use an existing standard bootloader and adopt relevant low-level design patterns from `llm.asm`. Do not build an OS or custom bootloader.
+3. **Model contract and scalar reference:** add explicit H128/Q4-G32-DOT4 descriptors, checked tensor/model metadata and the Qwen3.5 block topology. Implement scalar correctness for embeddings, normalization, projections, MLP, Gated DeltaNet, convolution history and full attention.
+4. **Qwen3.5 state and generation:** keep recurrent/convolution state distinct from attention KV; implement tokenizer, prefill, decode and greedy sampling for one sequence.
+5. **SIMD optimization:** add AVX2 and optional AVX-512/VNNI paths only after scalar differential tests. Benchmark prefill and decode independently.
+6. **Freestanding end-to-end MVP:** boot, load the exact model, prefill, decode and compare logits/tokens with the hosted oracle.
+7. **SMP and further boot path:** add APIC/SMP after single-core correctness; add direct firmware boot after the standard-loader inference image is stable.
+
+### Revised phase interpretation
+
+- Existing generic dense-decoder WP-09 is a useful architecture bring-up/reference exercise. It does **not** by itself satisfy the Qwen3.5 MVP.
+- The first model release requires Qwen3.5 hybrid-state support and H128/Q4-G32-DOT4; do not silently downgrade the model to Qwen3-0.6B or Q8_0 to claim completion.
+- The 150+ generated tokens/sec objective is a stretch target. The current local native results are a baseline to reproduce, not a guaranteed bare-metal outcome.
+- Keep the original memory and platform constraints: one sequence, contiguous bounded allocations, no paging/paged KV, no OS services and no direct boot path in the first end-to-end milestone.
+
