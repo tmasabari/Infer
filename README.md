@@ -10,6 +10,18 @@ The first delivery is a generic inference foundation. Qwen3.8-Flash-Next is the 
 
 ## Context and design documents
 
+### BareMetalInfer workstream (`BareMetalInfer` branch)
+
+This branch also contains a separate CPU-only, x86-64 bare-metal inference workstream. It is distinct from the RX 9070/ROCm product baseline described above; do not mix their runtime, hardware or acceptance criteria. The BareMetalInfer architecture and implementation context is maintained under [`docs/baremetal/`](docs/baremetal/):
+
+- [Architecture comparison and decision](docs/baremetal/ARCHITECTURE_COMPARISON_AND_DECISION.md) — comparison of `alesha-pro/llm.asm` and `Danmoreng/qwen35-cpu`, selected hybrid reuse strategy and MVP model direction.
+- [BareMetalInfer architecture](docs/baremetal/BAREMETAL_INFER_ARCHITECTURE.md) — platform boundaries, memory model and runtime invariants.
+- [Platform and language strategy](docs/baremetal/PLATFORM_AND_LANGUAGE_STRATEGY.md) — Rust `no_std`, assembly boundary, boot and ISA policy.
+- [Development VM setup](docs/baremetal/DEVELOPMENT_VM_SETUP.md) — Ubuntu/KVM/QEMU development and validation environment.
+- [Implementation roadmap](docs/baremetal/IMPLEMENTATION_ROADMAP.md) and [work packages](docs/baremetal/IMPLEMENTATION_WORK_PACKAGES.md) — delivery sequence and acceptance gates.
+
+
+
 - [Product requirements](docs/PRODUCT_REQUIREMENTS.md) — user value, Pareto priorities, scope and success criteria.
 - [Technical requirements](docs/TECHNICAL_REQUIREMENTS.md) — functional/non-functional requirements, Rust/FFI constraints and verification.
 - [Reference architecture](docs/REFERENCE_ARCHITECTURE.md) — subsystem boundaries, model adapters, tiered memory and execution flow.
