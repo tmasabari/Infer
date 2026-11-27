@@ -294,3 +294,30 @@ Paths below are proposed. Keep the workspace compact; do not create empty crates
 ## First release definition of done
 
 Complete WP-01 through WP-09. The standard-loader QEMU image boots, accepts a prompt over serial and generates tokens from one small dense model using scalar Rust kernels and bounded contiguous memory. WP-10 through WP-12 are subsequent optimization/platform milestones. Target runtime has no OS, libc, GPU, driver or vendor compute SDK dependency.
+
+## WP-00 — Reproducible Ubuntu/KVM development environment
+
+**Goal:** Provide an isolated development and test environment on the existing Ubuntu 26.04 host without changing its OS, bootloader or disk layout.
+
+**Interfaces / artifacts**
+- Documented KVM/libvirt VM definition for `BareMetalInfer-Dev`.
+- Host script or documented command to launch freestanding QEMU/KVM images.
+- Machine-readable benchmark environment metadata.
+
+**File-level changes**
+- docs/baremetal/DEVELOPMENT_VM_SETUP.md
+- scripts/vm/ (optional provisioning and launch scripts; add only after commands are validated)
+- tests/qemu/ (host-launched freestanding smoke test integration)
+- benchmarks/environment/ (capture host, guest, QEMU and CPU-feature metadata)
+
+**Dependencies:** Existing Ubuntu 26.04 host with AMD SVM enabled in firmware.
+
+**Acceptance tests**
+1. KVM is available and a clean Ubuntu guest boots.
+2. Guest CPU feature visibility and vCPU topology are recorded.
+3. Development guest builds the hosted adapter and host-side tests.
+4. Host-launched QEMU/KVM boots the freestanding test image with serial output.
+5. No nested virtualization is required for the initial workflow.
+6. Host OS, boot configuration and physical disk layout remain unchanged.
+7. Benchmark artifacts identify Linux VM versus freestanding QEMU/KVM execution; neither is mislabeled as physical bare metal.
+
