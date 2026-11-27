@@ -94,3 +94,22 @@ All packages must include:
 ## First end-to-end milestone
 
 A QEMU x86-64 image boots using the standard loader, initializes a single CPU core and serial console, validates a boot-provided packed tiny dense decoder model, accepts a prompt over serial and generates tokens with scalar Rust kernels and a contiguous KV-cache. No operation relies on an OS service, libc, GPU, driver or vendor compute SDK. This milestone deliberately precedes the custom/direct boot path and multicore support.
+
+## Phase -1 — Isolated development environment
+
+Before implementation, provision the documented Ubuntu 26.04 host environment using KVM/QEMU/libvirt and an Ubuntu Server development VM. This does not change the host OS or boot configuration.
+
+- Create the `BareMetalInfer-Dev` VM using Q35, OVMF, host-passthrough CPU, 6 vCPUs initially, 24–32 GiB RAM and a 100 GiB QCOW2 disk.
+- Verify KVM, guest CPUID feature visibility and actual vCPU topology.
+- Install the pinned Rust, LLVM/Clang, NASM, Ninja, QEMU and test toolchain.
+- Establish host-launched QEMU/KVM for freestanding image tests; do not require nested virtualization.
+- Keep hosted Linux tests and freestanding guest tests as separate benchmark categories.
+
+**Exit:** the development VM is reproducible and accessible; host QEMU/KVM can launch a minimal freestanding smoke image; the host OS and boot configuration remain unchanged.
+
+## Phase 0A — Hosted reference backend (development aid)
+
+Build a minimal Linux-hosted adapter for the shared inference core so model loading, tokenizer, scalar kernels, SIMD kernels and benchmark tooling can be developed quickly in the VM. This backend is a test/development target only and must not introduce `std`, libc, syscalls or OS dependencies into the freestanding artifact.
+
+**Exit:** the same core numerical and model tests can run in hosted test mode and in freestanding/QEMU mode. Benchmark output identifies the execution environment explicitly.
+
