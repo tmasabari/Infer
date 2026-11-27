@@ -170,3 +170,19 @@ The Linux backend is a development adapter, not a dependency of the freestanding
 Initial VM profile: host CPU passthrough, 6 vCPUs for development and 8 vCPUs for dedicated benchmarks, 24–32 GiB guest RAM, 100 GiB QCOW2 disk, Q35 and OVMF. Tune vCPU pinning only after inspecting actual host CPU topology. Keep host resources available and do not assume VM CPU pinning makes execution physically bare metal.
 
 All reports must distinguish Linux-guest, freestanding-QEMU/KVM and physical bare-metal results. QEMU/KVM validates the freestanding guest and CPU feature paths but does not provide direct physical motherboard, memory-controller, firmware or interrupt-controller access.
+
+
+## 13. Model and implementation decision (2026-11-27)
+
+The model-specific implementation direction is governed by [ARCHITECTURE_COMPARISON_AND_DECISION.md](ARCHITECTURE_COMPARISON_AND_DECISION.md). The initial generic dense-decoder description above remains useful as a bring-up and interface-design reference, but it is not the final model target.
+
+- **Primary MVP model:** Qwen3.5-0.8B using the validated H128/Q4-G32-DOT4 artifact (approximately 425 MB in the currently evaluated artifact).
+- **Model reference:** `Danmoreng/qwen35-cpu` is the hosted correctness/performance reference for Qwen3.5 architecture, quantization, DeltaNet state, full attention, KV behavior and kernel semantics. Its hosted C++ runtime is not linked into the freestanding target.
+- **Platform reference:** `alesha-pro/llm.asm` informs minimal boot, early CPU setup, memory layout, serial diagnostics and APIC/SMP design. Its Qwen3-0.6B transformer path is not the Qwen3.5 adapter.
+- **Target language:** retain Rust `no_std`; use x86-64 assembly only for boot/interrupt/AP startup or measured kernels.
+- **Qwen3-0.6B:** optional early platform smoke model only. It must not replace Qwen3.5 model semantics or become the primary model acceptance target.
+- **State model:** represent DeltaNet recurrent state and convolution history separately from attention KV. Do not force both into a single KV abstraction.
+- **Optimization:** implement scalar/reference behavior first, then H128/Q4-G32-DOT4 optimized kernels and runtime ISA dispatch.
+
+The first end-to-end Qwen3.5 milestone is still single-core, one sequence, greedy sampling and bounded contiguous memory. Paged KV, general VM, streaming, multi-model serving and direct firmware boot remain deferred.
+
