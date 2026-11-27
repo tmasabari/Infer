@@ -1,71 +1,71 @@
-# BareMetalInfer — Language and Platform Strategy
+# BareMetalInfer — Language, Toolchain and Boot Strategy
 
-## 1. Language selection
+## 1. Locked platform scope
 
-### Rust: primary implementation language
+Initial target: x86-64 AMD and Intel CPUs only. Do not add ARM64, Apple Silicon, GPU, vendor compute SDK or OS runtime dependencies to this branch's initial implementation.
 
-Use stable Rust with `#![no_std]` for the inference core, memory manager, scheduler, model adapters, tokenizer integration, quantization, scalar kernels and most platform services.
+AMD and Intel are both supported through architectural interfaces and runtime CPUID feature detection. Avoid vendor-specific code paths unless a measured, documented microarchitecture difference requires one.
 
-Use `alloc` only after the project provides a bounded global allocator. Avoid dependencies that silently require std, OS threads, filesystems, sockets, dynamic loading or host clocks.
+## 2. Language combination
 
-Use Rust traits for narrow hardware/runtime boundaries. Avoid excessive crate fragmentation and avoid a universal HAL trait with unrelated methods.
+### Rust — primary language
 
-### Assembly: narrow hardware and kernel boundary
+Use stable Rust with `#![no_std]` for the kernel, runtime services, inference core, model adapter, tokenizer integration, tensor metadata, scalar kernels, quantization, scheduler and memory arenas.
 
-Use architecture-specific assembly only for:
+Use `core` initially. Introduce `alloc` only after a bounded allocator is implemented and tested. Avoid crates that pull in `std`, OS threads, filesystem, sockets, dynamic loading, host clocks or hosted async runtimes.
 
-- Entry/boot transition and CPU mode setup.
-- Interrupt/exception entry stubs and secondary-core startup.
-- Context switch or low-level worker primitives if required.
-- Measured hot kernels that cannot be expressed efficiently through intrinsics.
+### x86-64 assembly — narrow boundary
 
-Use NASM or GNU assembler for x86-64 according to boot/toolchain integration. Use AArch64 GNU/LLVM assembler for ARM64. Keep assembly ABI wrappers small and documented.
+Use NASM for boot/entry stubs if it best fits the selected image format, and Rust `global_asm!`/LLVM assembly where it reduces toolchain complexity. Assembly is restricted to entry/transition code, interrupt stubs, secondary-core startup and kernels proven to need hand-written instructions.
 
-### Rust architecture intrinsics
+### Rust intrinsics — preferred SIMD implementation
 
-Prefer `core::arch` intrinsics for AVX2, FMA, AVX-512, NEON and SVE where supported by the compiler. This gives better type checking and easier testing than hand-writing every vector instruction.
+Prefer `core::arch::x86_64` intrinsics for SSE2, AVX2, FMA and optional AVX-512. Use assembly only when benchmarks show a material benefit or intrinsics cannot express a required sequence.
 
-### C: exception, not foundation
+### C — not part of the planned runtime
 
-Do not introduce C as a parallel application language. Permit small C ABI glue only if a selected firmware, bootloader or pre-existing component has a stable C interface that is materially simpler and does not introduce an OS/vendor runtime dependency.
+Do not add C or C++ as a second implementation language. A tiny C ABI shim requires an explicit architecture decision and must not introduce libc or a vendor runtime.
 
-## 2. Toolchain
+## 3. Toolchain
 
-Preferred toolchain:
+- Rust stable with explicit `x86_64-unknown-none` target.
+- Cargo workspace and committed lockfile for reproducibility.
+- LLVM/LLD or the Rust-supported linker path, with a reviewed linker script.
+- NASM only for the small boot assembly boundary.
+- QEMU x86-64 for automated boot tests.
+- OVMF/UEFI firmware and a Multiboot2-capable loader as applicable to the chosen boot path.
+- Host-side Rust/Python tools are permitted for model conversion, packing, image creation and test-data generation. They are build tools, not target runtime dependencies.
 
-- Rust stable toolchain with explicit target triples and `no_std` targets.
-- LLVM/LLD for linking and cross-target support.
-- NASM for x86-64 assembly where useful.
-- GNU/LLVM assembler for AArch64.
-- Cargo workspace with reproducible locked dependencies.
-- QEMU for x86-64 and AArch64 emulation; hardware validation remains mandatory.
+Audit the final ELF and boot image for undefined symbols, dynamic sections, relocations that cannot be resolved at load time, unexpected runtime crates and forbidden imports.
 
-Build host tools may use Python or Rust std. The booted target must not depend on the host toolchain or a host OS.
+## 4. Two boot paths
 
-## 3. Boot strategy
+### Path A: standard bootloader — implement first
 
-Keep boot protocol replaceable. Start with a mature documented boot protocol/loader for the first vertical slice rather than writing a custom bootloader before inference works. A Multiboot2-compatible loader or a UEFI application path can be evaluated for x86-64. The loader supplies a memory map and kernel/module payloads; BareMetalInfer validates all ranges before use.
+Choose one documented protocol as the initial vertical slice (prefer Multiboot2 if the chosen loader and QEMU setup make it simplest). Keep a UEFI path as an alternative adapter if required for modern hardware coverage. Do not implement both loader protocols in the first sprint.
 
-A later direct-boot path may remove the external bootloader where there is a clear benefit. Firmware remains unavoidable on commodity systems; "no OS dependency" does not mean "no firmware or boot protocol".
+The loader supplies kernel/module addresses and a memory map. Validate all values and normalize them into the internal `BootInfo` structure. The loader is not an OS dependency; it is a boot-time component.
 
-ARM64 boot must be evaluated separately. Do not assume x86 Multiboot, APIC, BIOS or PC memory-map behavior applies to ARM.
+### Path B: native/direct firmware boot — implement second
 
-## 4. CPU feature policy
+After the standard-loader image boots and runs inference, add a direct x86 firmware entry path (UEFI application or another explicitly selected firmware interface). Keep firmware protocol calls in the boot adapter and convert them to the same `BootInfo` contract before transferring control to the shared kernel entry.
 
-- Build a conservative baseline image.
-- Detect CPU vendor/family/model and architectural features at runtime.
-- Enable a feature only when hardware support and required architectural state are confirmed.
-- Keep dispatch table-driven and test unsupported-feature fallbacks.
-- Never require an AMD, Intel or Apple proprietary compiler/runtime.
-- Do not branch on vendor identity when an architectural capability check is sufficient.
+"Both" means both boot paths eventually exist; it does not mean a custom BIOS/UEFI bootloader must be written before inference works.
 
-## 5. Portability stages
+## 5. CPU feature detection and dispatch
 
-1. x86-64 QEMU reference platform.
-2. AMD x86-64 physical hardware.
-3. Intel x86-64 physical hardware.
-4. AArch64 QEMU reference platform.
-5. Generic ARM64 hardware with a documented boot protocol.
-6. Apple Silicon boot feasibility investigation and separately scoped platform work.
+- Build a conservative x86-64 baseline.
+- Detect CPUID feature bits at runtime.
+- Check OSXSAVE and XCR0 state before using AVX-family instructions.
+- Keep scalar fallback and test dispatch with feature masks.
+- Do not use AVX2/AVX-512 in generic code paths.
+- Treat AVX-512 as optional and benchmark per CPU.
+- Use vendor identity only for diagnostics or a proven tuning exception, not as the feature gate.
 
-The portable Rust inference core should be tested across targets before every boot platform is available.
+## 6. Build and test separation
+
+Target runtime: `no_std`, no libc, no OS imports, no GPU/driver/SDK.
+
+Host tools: may use `std`, Python and ordinary filesystem/process APIs. Keep them in a separate workspace package and never link them into the target image.
+
+QEMU validates boot, memory contracts and basic inference behavior. Physical AMD and Intel hardware validation is required before declaring platform support.
