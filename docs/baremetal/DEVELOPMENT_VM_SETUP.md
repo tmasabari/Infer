@@ -192,3 +192,18 @@ Keep Linux VM, freestanding QEMU/KVM and physical bare-metal results in separate
 - [ ] Freestanding QEMU smoke tests pass.
 - [ ] Benchmark reports distinguish hosted VM from freestanding VM results.
 - [ ] Host OS, bootloader and disk layout remain unchanged.
+
+
+## 12. Qwen3.5 reference and benchmark workflow
+
+The hosted development VM is also the reference and differential-test environment for the selected Qwen3.5-0.8B model. Use [ARCHITECTURE_COMPARISON_AND_DECISION.md](ARCHITECTURE_COMPARISON_AND_DECISION.md) for the source-reuse decision.
+
+- Keep the exact model artifact and tokenizer available to the hosted reference harness and packer.
+- Record SHA-256, upstream source revisions, compiler flags, CPU features, prompt token IDs, context and generated-token count.
+- Run hosted reference tests separately from freestanding QEMU/KVM tests.
+- Compare intermediate logits/tensors and deterministic greedy output before comparing throughput.
+- Label all results as hosted Linux VM, freestanding QEMU/KVM or physical bare metal.
+- Do not treat QEMU/KVM throughput as a physical bare-metal result or infer that removing Linux will produce a fixed percentage speedup.
+
+The currently evaluated Qwen3.5-0.8B H128/Q4-G32-DOT4 artifact is approximately 425 MB. Confirm the exact file hash and metadata in the local environment; do not rely on the approximate size as an identity check.
+
