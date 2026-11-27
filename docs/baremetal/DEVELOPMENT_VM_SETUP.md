@@ -12,7 +12,7 @@ Use the existing Ubuntu host as the hypervisor. Do not replace the host OS, repa
 Use two execution modes:
 
 1. **Linux development/benchmark VM:** Ubuntu Server guest for compiling, testing and running the hosted platform adapter. This provides a convenient development environment and a baseline for inference-kernel performance.
-2. **Freestanding test VM:** Launch the Limine-based BareMetalInfer image directly with QEMU/KVM from the Ubuntu host. The guest contains no Linux OS; it boots the BareMetalInfer image.
+2. **Freestanding test VM:** Launch the selected standard-loader BareMetalInfer image directly with QEMU/KVM from the Ubuntu host. The guest contains no Linux OS; it boots the BareMetalInfer image.
 
 Do not initially nest QEMU inside the development VM. Host-launched QEMU avoids nested-virtualization complexity and provides a more direct view of the host CPU features.
 
@@ -128,7 +128,7 @@ Install and pin the Rust toolchain with rustup and commit the project's toolchai
 
 ## 8. Freestanding QEMU/KVM test path
 
-Build the Limine boot image inside the development workflow, but initially launch the freestanding image from the Ubuntu host. Example command (adapt firmware, disk/image arguments and serial configuration to the actual build output):
+Build the selected standard-loader boot image inside the development workflow, but initially launch the freestanding image from the Ubuntu host. Example command (adapt firmware, disk/image arguments and serial configuration to the actual build output):
 
 ```bash
 qemu-system-x86_64 \
