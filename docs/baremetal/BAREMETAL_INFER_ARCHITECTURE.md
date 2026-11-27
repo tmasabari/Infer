@@ -1,149 +1,158 @@
 # BareMetalInfer — Reference Architecture
 
-**Status:** Proposed architecture baseline  
+**Status:** Decision baseline  
 **Branch:** `BareMetalInfer`  
-**Purpose:** CPU-only, operating-system-independent LLM inference on supported bare-metal systems.
+**Scope:** x86-64 bare-metal CPU inference only.
 
 ## 1. Product definition
 
-BareMetalInfer is a standalone inference system that boots on supported hardware and runs transformer inference directly on CPU resources. It does not require a host operating system, GPU, GPU driver, vendor compute SDK, vendor runtime, libc, or a general-purpose userspace.
+BareMetalInfer is a small, OS-independent LLM inference engine that boots on AMD and Intel x86-64 systems and executes transformer inference directly on CPU cores.
 
-The project is CPU-native. It is not a GPU inference runtime and does not inherit the ROCm/HIP or CUDA architecture from the original Infer project.
+The target runtime has no dependency on Linux, Windows, macOS, POSIX, libc, GPU, GPU driver, vendor compute SDK, or vendor runtime. Firmware and a boot mechanism are still required; "bare metal" means no host operating system is required, not that firmware is absent.
 
-The inference core must be independent of the boot mechanism and platform initialization. Platform-specific code is isolated behind narrow interfaces.
+The first release is inference-only. It does not implement a general-purpose OS, training, networking, filesystems, GPU execution or multi-architecture runtime.
 
-## 2. Supported processor families
+## 2. Locked decisions
 
-Initial architecture families:
+| Decision | Adopted direction |
+|---|---|
+| Boot | Support both a standard bootloader path and a future native/direct boot path |
+| CPU | x86-64 only initially; AMD and Intel |
+| Model | Small dense decoder-only model first |
+| Memory | Simple bounded physical-memory layout and fixed arenas; no advanced paging/paged-KV subsystem initially |
+| Scope | Inference only; implement only platform services inference requires |
+| Primary language | Rust `no_std` |
+| Low-level code | Small x86-64 assembly boundary and measured SIMD kernels |
 
-- x86-64: AMD and Intel processors.
-- AArch64: ARMv8-A and later, with Apple Silicon treated as a separate platform feasibility target.
-
-Runtime CPU feature detection is mandatory. Never assume AVX2, FMA, AVX-512, NEON, or SVE merely from the processor family. Select only kernels supported by the detected CPU and enabled OS-independent architectural state.
-
-Important distinction: CPU ISA portability does not guarantee firmware/boot portability. Apple Silicon has a platform-specific boot and security chain. The portable inference core can target AArch64, but generic bare-metal boot on Apple hardware is not promised until independently validated.
+The standard-loader path is the first implementation path. The direct/native boot path is a second boot adapter, not a prerequisite for completing inference. Both must enter the same kernel/runtime entry contract.
 
 ## 3. Layered architecture
 
 ```text
-       Firmware / Boot Protocol
-                 |
-          Boot & Platform HAL
-                 |
-       CPU / Memory Initialization
-                 |
-        BareMetal Runtime Services
-       (alloc, threads, timers, I/O)
-                 |
-          Inference Application
-                 |
-       Scheduler / Request Runtime
-                 |
-        Model Architecture Adapter
-                 |
-       CPU Execution / Kernel Planner
-                 |
-       Tensor & Quantization Kernels
-                 |
-       Model + Tokenizer + KV State
+             Firmware
+                |
+      +---------+----------+
+      |                    |
+ Standard boot path   Native boot path
+ (Multiboot2/UEFI)    (later milestone)
+      |                    |
+      +---------+----------+
+                |
+          x86 Boot Adapter
+                |
+       Minimal CPU/Memory Init
+                |
+        Bare-metal Runtime
+ (allocator, AP startup, timer, console)
+                |
+          Inference Core
+                |
+       Model Adapter (small dense)
+                |
+        CPU Kernel Dispatcher
+                |
+      Scalar / x86 SIMD Kernels
+                |
+       Model + Tokenizer + KV
 ```
 
-### 3.1 Boot and platform HAL
+Boot adapters must provide the same validated `BootInfo` contract: memory map, kernel/module ranges, framebuffer/serial information when available, firmware tables and boot method. Inference code must never inspect boot protocol structures.
 
-Owns entry point, CPU mode setup, interrupt/exception tables, physical memory map, page tables, AP startup, timers and minimal console/input. Boot protocol and firmware details must not leak into inference crates.
+## 4. Runtime boundaries and interfaces
 
-### 3.2 Runtime services
+Keep interfaces small and capability-oriented:
 
-Provide small OS-independent contracts for:
+- `BootInfoProvider`: validated memory map, modules and boot metadata.
+- `PhysicalMemory`: allocate/free bounded page ranges and reserve regions.
+- `Arena`: aligned allocation from fixed pre-reserved regions.
+- `CpuInfo`: topology and runtime ISA feature discovery.
+- `CoreControl`: start secondary cores and expose core identifiers.
+- `WorkerPool`: bounded worker execution, barriers and wake/wait.
+- `Clock`: monotonic ticks and calibrated frequency.
+- `Console`: serial output initially; framebuffer/keyboard optional.
+- `ModelSource`: immutable byte ranges for packed model assets.
 
-- Physical and virtual memory allocation.
-- Memory mapping and model loading.
-- CPU topology and feature discovery.
-- Worker creation, barriers, atomics and wait/wake.
-- Monotonic time and profiling.
-- Console, serial and optional framebuffer output.
-- Panic, exception and fault reporting.
+Do not create a broad generic HAL that combines unrelated capabilities. Do not expose physical addresses outside memory/platform modules.
 
-No POSIX, pthread, Linux syscall, Windows API, libc or hosted async runtime dependency.
+## 5. Memory design — deliberately simple
 
-### 3.3 Inference core
+Use a validated firmware/bootloader memory map and a small number of fixed regions. The first implementation uses a bump/arena allocator with explicit alignment, bounds and high-water accounting. Add a small free-list/page allocator only where boot/runtime needs reusable pages.
 
-Owns model-neutral tensor metadata, quantization descriptors, tokenizer interface, model adapter registry, prefill/decode lifecycle, sampling, KV cache, scheduling, telemetry and resource accounting.
+Initial regions:
 
-The inference core must compile with `no_std` and `alloc`. Hardware-specific operations are accessed through small traits.
+1. Kernel image, page tables and per-core stacks.
+2. Read-only model and tokenizer module.
+3. KV-cache arena.
+4. Activation and scratch arena.
+5. Runtime metadata and worker state.
+6. Reserved firmware and unavailable memory.
 
-### 3.4 Model adapters
+Use only the minimum page tables required to enter and operate in x86-64 long mode. Do not build a general virtual-memory manager, swap, demand paging, NUMA policy or huge-page optimizer in the first milestone. Huge pages are an optional later experiment, not an architectural dependency.
 
-Keep model topology separate from kernels and platform services. Start with a small dense decoder-only transformer adapter, then add Qwen-family support after tensor mapping, normalization, RoPE, attention, MLP and tokenizer contracts are validated.
+KV-cache starts as one bounded contiguous allocation per active sequence. No paged KV, eviction, CPU/GPU tiering or streaming subsystem in the initial scope. Define a small KV interface so its implementation can evolve without exposing physical addresses.
 
-Do not assume Qwen3.8 compatibility until the exact architecture and checkpoint format are verified.
+Model weights should be consumed from a validated read-only boot module where practical, avoiding unnecessary copies. The packer must align tensor sections and validate all offsets and lengths before the target accesses them.
 
-### 3.5 CPU execution backend
+## 6. Inference core
 
-Provide a scalar correctness backend and optimized kernel sets:
+The inference core is `no_std` and independent of boot protocol, firmware and CPU vendor. It owns:
 
-- Generic scalar Rust reference.
-- x86-64 baseline SIMD.
-- x86-64 AVX2 + FMA.
-- Optional AVX-512 variants.
-- AArch64 NEON.
-- Optional SVE/SVE2 variants.
+- Tensor metadata and shape validation.
+- Dtype and quantization descriptors.
+- Small dense decoder model adapter.
+- Tokenizer contract and sampling.
+- Prefill/decode lifecycle.
+- Contiguous KV-cache contract.
+- Scalar reference operations.
+- Kernel dispatch contract.
+- Memory and performance counters.
 
-Kernel selection uses runtime feature detection plus shape, dtype and workload characteristics. Keep prefill and decode plans separate.
+Do not build a generic plugin framework or support multiple model families before one end-to-end model is correct.
 
-## 4. Memory architecture
+## 7. CPU execution
 
-Use explicit physical-memory and virtual-memory abstractions. Separate logical model tensors and KV blocks from their physical addresses.
+Start with a scalar Rust reference backend. Add x86-64 variants only after correctness and profiling:
 
-Initial memory regions:
+- x86-64 baseline.
+- SSE2 where useful for baseline-compatible vectorization.
+- AVX2 + FMA.
+- Optional AVX-512 after hardware coverage and benchmark evidence.
 
-- Kernel/runtime region.
-- Model weights region.
-- Tokenizer region.
-- KV-cache region.
-- Activation/workspace arena.
-- Per-core stacks and scheduler metadata.
-- Reserved firmware and device memory.
+Use runtime CPUID and OS-independent architectural-state checks before dispatching extended ISA instructions. Never infer instruction availability from AMD/Intel vendor strings. Keep scalar fallback available.
 
-Support aligned arenas, bounded allocation, memory-map validation, huge pages where available, and explicit ownership. Model loading should avoid unnecessary copies: a boot module or memory-mapped image may be registered as a read-only model region.
+Separate prefill and decode kernels. Prioritize matrix-vector/decode and matrix-matrix/prefill independently. Add fused QKV or gate/up only when the selected model architecture supports the fusion and numerical tests prove equivalence.
 
-KV-cache is a replaceable subsystem. Begin with contiguous per-sequence storage; introduce block/paged allocation only after correctness and fragmentation measurements justify it. No GPU/CPU tiering is required because this project is CPU-only, but the logical KV API must not expose physical addresses.
+## 8. Boot strategy
 
-## 5. Threading and CPU topology
+### Path A — standard loader (first)
 
-Use a platform-neutral worker interface. Platform implementations may use APIC/IPI on x86-64 and architecture-appropriate interrupt/mailbox mechanisms on ARM64. The inference scheduler must not know those details.
+Use a documented existing bootloader/protocol to load the kernel and model module. The bootloader is a build/boot-time dependency, not a runtime OS dependency. The kernel validates every address, size, alignment and memory-map entry before use.
 
-Start with static worker pools and deterministic barriers. Add work stealing only if benchmarks justify it. Bound all queues and make shutdown/resource reclamation explicit.
+### Path B — native/direct boot (later)
 
-## 6. Numerical and verification architecture
+Implement a small x86 firmware entry path only after Path A has a working inference image. Keep firmware entry, mode transition and boot metadata conversion in a separate adapter. Both paths must produce the same `BootInfo`.
 
-Every optimized kernel must have a scalar reference implementation and differential tests. Verify:
+## 9. Verification and benchmarks
 
-- Absolute and relative error.
-- Cosine similarity where appropriate.
-- NaN/Inf absence.
-- Logit agreement.
-- Greedy token agreement over longer sequences.
-- Thread-count determinism where the algorithm promises it.
+Every optimized kernel has a scalar reference and differential tests for absolute/relative error, NaN/Inf, logits and greedy-token agreement. Test single-core before multicore. Benchmark prefill, decode, time-to-first-token, memory footprint and scaling separately. Record CPU model, microcode/firmware where available, ISA, clock policy, memory, model hash, quantization, prompt/context and worker count.
 
-Benchmark prefill and decode independently, recording CPU model, ISA features, clocks where available, memory configuration, model revision, quantization, context and worker count.
+## 10. Non-goals
 
-## 7. Non-goals
+- No GPU, GPU driver, GPU compute API or vendor SDK.
+- No OS runtime, libc, POSIX, syscalls or hosted runtime dependency.
+- No ARM64 in this project baseline.
+- No general-purpose OS, filesystem, network stack or shell.
+- No training or fine-tuning.
+- No advanced virtual-memory manager, paged KV, swap or GPU/CPU tiering.
+- No multi-model server or general plugin ecosystem in the first release.
 
-- No GPU execution or GPU driver support.
-- No CUDA, ROCm, HIP, Metal, oneAPI or vendor compute SDK.
-- No dependency on Linux, Windows, macOS, POSIX or libc at runtime.
-- No hosted service, HTTP server or general-purpose userspace in the initial product.
-- No training/fine-tuning in the initial inference milestone.
-- No claim of generic bare-metal boot support on Apple Silicon before platform validation.
+## 11. Architectural invariants
 
-## 8. Architectural invariants
-
-1. Inference core is independent of boot protocol, firmware and platform.
-2. Scalar reference behavior is the correctness authority.
-3. Runtime feature detection gates every specialized kernel.
-4. No raw physical address crosses model/application interfaces.
-5. All allocations are bounded, accounted and reclaimable.
-6. Platform-specific code is isolated behind HAL/runtime contracts.
-7. Optimize only against reproducible end-to-end measurements.
-8. Prefer the smallest implementation that meets the current milestone.
+1. Both boot paths enter the same kernel contract.
+2. Inference core never depends on boot protocol or firmware.
+3. Scalar kernels define reference behavior.
+4. ISA dispatch is runtime-checked and always has a safe fallback.
+5. Memory is bounded, aligned, accounted and validated.
+6. Physical addresses do not cross into model/inference APIs.
+7. The smallest working model is delivered before framework generalization.
+8. No optimization is accepted without reproducible end-to-end measurements.
