@@ -1,91 +1,96 @@
 # BareMetalInfer — Implementation Roadmap
 
-**Approach:** prove a bootable, testable CPU inference vertical slice before expanding model support or platform count.
+**Confirmed scope:** x86-64 only; AMD and Intel; small dense model first; inference only; simple bounded memory; two boot paths, implemented sequentially.
 
-## Phase 0 — Architecture and feasibility
+## Phase 0 — Build and boot skeleton
 
-- Freeze CPU-only and no-host-OS runtime constraints.
-- Confirm x86-64 boot protocol and QEMU baseline.
-- Validate Rust `no_std` target, linker script and panic path.
-- Define HAL, allocator, CPU feature and worker contracts.
-- Investigate AArch64 and Apple Silicon boot constraints separately.
+- Create minimal Rust `no_std` x86-64 kernel target and linker script.
+- Establish QEMU + standard-loader boot path.
+- Define shared `BootInfo` contract and validate memory-map/module ranges.
+- Add serial output and panic/exception reporting.
+- Add static binary and forbidden-dependency audit.
 
-**Exit:** reproducible image boots in QEMU, reports memory map and CPU features, and reaches a minimal console.
+**Exit:** reproducible QEMU image boots through the standard loader, reports validated memory regions and CPU identity/features, then halts cleanly. No libc, dynamic linker, OS syscall or vendor runtime dependency.
 
-## Phase 1 — Bare-metal runtime foundation
+## Phase 1 — Minimal runtime and bounded memory
 
-- Boot entry, GDT/IDT, exception handling and page tables.
-- Physical memory map parser and bounded page allocator.
-- Heap/arena allocator with accounting and guard checks.
-- Timer and serial/framebuffer console.
-- CPU topology discovery and secondary-core startup.
-- Basic worker pool, barriers and atomics.
+- Parse and normalize boot memory map.
+- Reserve kernel, stacks, model module, KV, scratch and metadata regions.
+- Implement aligned bump/arena allocator with bounds and high-water accounting.
+- Add only the page tables and physical page allocation needed for x86-64 operation.
+- Initialize GDT/IDT, exception handlers and monotonic timer.
+- Add one-core runtime first; defer AP startup until the single-core inference vertical slice works.
 
-**Exit:** memory and worker stress tests pass; faults are diagnosable; no hosted OS APIs or libc symbols are linked.
+**Exit:** allocator tests cover alignment, exhaustion, overflow and reserved-range protection. Faults report through serial. No general-purpose VM, swap or paged allocator.
 
-## Phase 2 — Inference core without model-specific optimization
+## Phase 2 — Scalar inference foundation
 
-- `no_std` domain types and error model.
-- Tensor descriptors, dtype and quantization metadata.
-- Scalar math, normalization, RoPE and activation reference operations.
-- Matrix-vector and matrix-matrix reference kernels.
-- Tokenizer interface and model source/module registry.
-- Contiguous KV-cache and sequence lifecycle.
+- Define tensor shape/stride/dtype and checked indexing.
+- Define quantization metadata and packed-model tensor descriptors.
+- Implement scalar reference matvec/matmul, normalization, RoPE, activation and softmax.
+- Define model source, tokenizer, sampler and KV-cache interfaces.
+- Implement bounded contiguous KV-cache and one active sequence.
+- Build host-side numerical tests for reference operators.
 
-**Exit:** host-side unit tests and QEMU target tests validate core components independently of boot hardware.
+**Exit:** reference operators pass deterministic unit tests and target-side smoke tests. Memory use is bounded and reported.
 
 ## Phase 3 — First end-to-end small model
 
-- Select a documented small dense decoder model and checkpoint format.
-- Build an offline model packer/exporter.
-- Load model weights from a boot module into validated read-only regions.
-- Implement embedding, attention, MLP, residual, normalization and output head.
-- Implement greedy decoding and deterministic sampling.
-- Add interactive serial console first; VGA/keyboard are optional presentation layers.
+- Select one small dense decoder checkpoint with known architecture and permissive redistribution terms.
+- Implement a host-side exporter/packer that emits versioned, aligned model sections.
+- Validate header, tensor table, offsets, dimensions, quantization and checksums before inference.
+- Load packed weights from a boot module as read-only data without unnecessary copies.
+- Implement embedding, decoder blocks, attention, MLP, final norm and output projection.
+- Integrate the exact tokenizer vocabulary/merges and Unicode test corpus.
+- Implement greedy decode first; add top-p only after deterministic baseline.
+- Use serial input/output as the initial user interface.
 
-**Exit:** complete prompt-to-token generation on one CPU core with reference-logit and token comparisons.
+**Exit:** prompt-to-token generation works on one x86-64 core in QEMU and at least one physical AMD or Intel machine. Logits and greedy tokens match the reference within documented tolerances.
 
-## Phase 4 — SIMD and multicore optimization
+## Phase 4 — x86 SIMD and performance
 
-- x86-64 baseline and AVX2/FMA kernels.
-- AArch64 NEON kernels.
-- Optional AVX-512/SVE only after baseline profiling.
-- Fused projections and quantization-aware GEMV/GEMM.
-- Multicore layer/projection scheduling and reduction correctness.
-- Separate prefill and decode kernel plans.
-- Huge-page experiments with controlled A/B tests.
+- Add conservative x86-64 SIMD baseline.
+- Add AVX2/FMA quantized matvec and matmul kernels.
+- Add optional AVX-512 kernels behind runtime feature checks.
+- Fuse compatible projections only after baseline kernels are correct.
+- Separate prefill and decode dispatch.
+- Benchmark scalar vs SIMD and collect memory bandwidth/latency counters where available.
 
-**Exit:** reproducible improvement over scalar baseline without correctness regressions; scaling and saturation documented.
+**Exit:** each optimized kernel passes differential tests and has a repeatable performance improvement on at least one supported CPU without regressions on fallback CPUs.
 
-## Phase 5 — Model and format expansion
+## Phase 5 — Multicore and second boot path
 
-- Qwen-family architecture adapter after exact architecture validation.
-- Q8_0 and additional quantization formats selected by measured CPU benefit.
-- Robust tokenizer assets and Unicode tests.
-- Block/paged KV only if memory fragmentation or context scaling requires it.
-- Model compatibility matrix and golden test corpus.
+- Discover ACPI processor topology and local APIC capabilities.
+- Start secondary cores using a small x86 AP startup path.
+- Add bounded worker pool, barriers and deterministic reduction behavior.
+- Measure scaling and saturation; avoid oversubscription.
+- Add second boot path (direct UEFI/firmware entry) and normalize into the same `BootInfo`.
+- Run identical inference tests through both boot paths.
 
-**Exit:** at least one additional model/checkpoint runs without changing platform HAL or kernel dispatch contracts.
+**Exit:** both boot paths execute the same model and inference core; multicore output correctness is stable across worker counts.
 
-## Phase 6 — Platform expansion
+## Phase 6 — Model and quantization expansion
 
-- Intel hardware validation.
-- AArch64 QEMU and physical hardware.
-- Apple Silicon feasibility decision and platform-specific boot research.
-- Additional firmware/boot protocol adapters without changing inference core.
+- Add one additional small dense model only after adapter boundaries prove useful.
+- Add Q8_0 and another quantization format selected by measured CPU performance.
+- Expand context and KV sizing tests.
+- Add model compatibility documentation and golden prompts.
+- Consider more advanced memory/KV strategies only when measurements demonstrate need.
 
-## Required engineering gates
+**Exit:** a second model runs without changing boot/runtime services or duplicating kernels.
 
-Every phase includes:
-- Reproducible build and image generation.
-- No accidental `std`, libc, OS syscall or vendor SDK dependency in the target.
-- Static binary inspection and symbol/dependency audit.
-- Unit tests for scalar reference operations.
-- Contract tests for HAL and allocator implementations.
-- Fault-path and memory exhaustion tests.
-- Numerical differential tests for optimized kernels.
-- Benchmark metadata and repeatable prefill/decode workloads.
+## Work-package acceptance gates
 
-## First milestone definition of done
+All packages must include:
+- Explicit interfaces and ownership.
+- File-level changes.
+- Unit/contract tests.
+- QEMU integration test where applicable.
+- Static binary/dependency audit.
+- Failure-path tests (invalid boot info, memory exhaustion, unsupported ISA).
+- Numerical comparison for math/kernel changes.
+- Benchmark baseline for performance changes.
 
-A bootable x86-64 image starts in QEMU, initializes memory and one CPU core, loads a tiny dense decoder model supplied as a boot module, accepts a prompt over serial, generates tokens using scalar Rust kernels, and exits no operation through an OS service. The image has no dynamic libraries, libc, GPU runtime, GPU driver, vendor compute SDK or host-OS runtime dependency.
+## First end-to-end milestone
+
+A QEMU x86-64 image boots using the standard loader, initializes a single CPU core and serial console, validates a boot-provided packed tiny dense decoder model, accepts a prompt over serial and generates tokens with scalar Rust kernels and a contiguous KV-cache. No operation relies on an OS service, libc, GPU, driver or vendor compute SDK. This milestone deliberately precedes the custom/direct boot path and multicore support.
