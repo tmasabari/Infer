@@ -321,3 +321,98 @@ Complete WP-01 through WP-09. The standard-loader QEMU image boots, accepts a pr
 6. Host OS, boot configuration and physical disk layout remain unchanged.
 7. Benchmark artifacts identify Linux VM versus freestanding QEMU/KVM execution; neither is mislabeled as physical bare metal.
 
+
+## Qwen3.5 MVP integration work packages — decision update 2026-11-27
+
+The original WP-01 through WP-12 define the platform and generic inference foundation. The following model-specific packages extend that plan; the generic dense decoder in WP-09 is a bring-up exercise and is not sufficient to declare the Qwen3.5 MVP complete. See [ARCHITECTURE_COMPARISON_AND_DECISION.md](ARCHITECTURE_COMPARISON_AND_DECISION.md).
+
+### WP-13 — Upstream pinning, model artifact and reference harness
+
+**Goal:** Make the exact Qwen3.5 reference reproducible before porting model behavior.
+
+**Files/artifacts**
+- `docs/baremetal/UPSTREAM_DEPENDENCIES.md`
+- `benchmarks/baselines/qwen35-0.8b/` (metadata, model SHA-256, tokenizer identity, prompt corpus and raw results)
+- `tools/reference-tests/qwen35/` (hosted comparison runner; host-only dependencies)
+
+**Dependencies:** WP-00, WP-06.
+
+**Acceptance**
+1. Pin exact upstream commits for `qwen35-cpu` and `llm.asm`; record license and files/algorithms intended for reference or adaptation.
+2. Record exact model artifact, quantization, tokenizer and hashes.
+3. Reproduce hosted logits and greedy outputs for fixed prompt fixtures.
+4. Benchmark prefill/decode separately with full environment metadata.
+5. No upstream hosted C++ or Linux dependency enters the target image.
+
+### WP-14 — H128/Q4-G32-DOT4 format and scalar reference
+
+**Goal:** Implement validated model storage and a scalar correctness path for the selected quantization.
+
+**Interfaces**
+- `QuantizationDescriptor`: format ID, block geometry, scale representation, transformed dimension and encoded byte length.
+- `H128Transform`: deterministic forward/inverse or reference transform operations required by the quantized dot path.
+- `Q4G32Dot4Block`: checked view over one packed quantization block.
+- Scalar dot/matvec functions with explicit accumulation behavior.
+
+**File-level changes**
+- `src/quant/{h128.rs,q4_g32_dot4.rs,layout.rs}`
+- `src/kernels/scalar/q4_g32_dot4.rs`
+- `tests/quant/{h128.rs,q4_g32_dot4.rs,corrupt_blocks.rs}`
+
+**Dependencies:** WP-03, WP-05, WP-06, WP-13.
+
+**Acceptance**
+1. Valid blocks decode with exact documented scale/group layout.
+2. Invalid lengths, dimensions, offsets, alignment and unsupported variants fail before access.
+3. Scalar dot/matvec agrees with a trusted upstream/reference implementation within a documented tolerance.
+4. Randomized and edge-case tests cover zero blocks, extrema, NaN/Inf policy and tails.
+5. Model weights remain read-only and are not copied wholesale into a second buffer.
+
+### WP-15 — Qwen3.5 hybrid model adapter and state
+
+**Goal:** Implement the exact Qwen3.5-0.8B architecture, including both recurrent and attention state.
+
+**Interfaces**
+- `Qwen35ModelAdapter`: validates metadata and constructs a typed execution plan.
+- `BlockKind`: explicitly distinguishes Gated DeltaNet and full-attention blocks.
+- `DeltaNetState`: recurrent state and convolution history with validated dimensions/lifetime.
+- `AttentionKvState`: attention KV layout, position and bounded capacity.
+- `Qwen35Runtime`: prefill/decode operations over explicit sequence state.
+
+**File-level changes**
+- `src/model/qwen35/{mod.rs,config.rs,topology.rs,weights.rs,forward.rs,delta_net.rs,attention.rs,mlp.rs}`
+- `src/state/{mod.rs,delta_net.rs,conv_history.rs,attention_kv.rs,sequence.rs}`
+- `tests/model/qwen35/{metadata.rs,topology.rs,state.rs,logits.rs}`
+
+**Dependencies:** WP-07, WP-08, WP-13, WP-14.
+
+**Acceptance**
+1. Exact artifact metadata maps to expected layer/block topology and tensor shapes.
+2. DeltaNet recurrent state and convolution history are stored separately from attention KV.
+3. Prefill and one-token decode produce finite intermediate tensors and logits.
+4. Intermediate outputs match the hosted oracle within documented per-operation tolerances.
+5. Greedy token sequences match reference fixtures for deterministic prompts.
+6. Context/state exhaustion is bounded and returns explicit errors.
+
+### WP-16 — AVX2 and AVX-512/VNNI Q4 kernels
+
+**Goal:** Optimize the H128/Q4-G32-DOT4 path without changing its numerical contract.
+
+**File-level changes**
+- `src/kernels/x86_64/{avx2/q4_g32_dot4.rs,avx512/q4_g32_dot4.rs,dispatch.rs}`
+- `tests/kernels/q4_differential.rs`
+- `benches/q4_matvec.rs`, `benches/prefill.rs`, `benches/decode.rs`
+
+**Dependencies:** WP-04, WP-14, WP-15.
+
+**Acceptance**
+1. Scalar, AVX2 and AVX-512/VNNI implementations pass randomized differential tests.
+2. CPUID leaf bounds, OSXSAVE and XCR0 checks gate every AVX-family path.
+3. Forced feature masks verify safe fallback on unsupported guests.
+4. Each kernel is benchmarked independently on target hardware and QEMU/KVM; VM results are not represented as physical bare metal.
+5. End-to-end improvement is repeatable and does not regress logits or greedy tokens.
+
+### Updated delivery gate
+
+The Qwen3.5 MVP is complete only when the freestanding image loads the exact pinned Qwen3.5-0.8B H128/Q4-G32-DOT4 artifact, runs hybrid DeltaNet/full-attention prefill and decode, preserves bounded recurrent/convolution/KV state, and matches the hosted oracle. WP-01 through WP-09 alone are the platform/generic inference milestone, not the final model MVP.
+
