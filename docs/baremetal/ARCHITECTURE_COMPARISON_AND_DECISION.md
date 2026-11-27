@@ -253,3 +253,12 @@ The `llm.asm` published figures use Qwen3-0.6B Q8_0 on different EPYC/Xeon syste
 - [Implementation roadmap](IMPLEMENTATION_ROADMAP.md)
 - [Implementation work packages](IMPLEMENTATION_WORK_PACKAGES.md)
 - [Development VM setup](DEVELOPMENT_VM_SETUP.md)
+
+
+## 11. Published `llm.asm` performance context
+
+The `llm.asm` project reports Qwen3-0.6B Q8_0 results on an AMD EPYC 7642 system including approximately 126.8 generated tokens/sec on Linux at 40 threads and 134.9 tokens/sec in a bare-metal KVM configuration at 16 vCPUs; its reported peak is around 136.6 tokens/sec. It also reports approximately 23.7 tokens/sec at one vCPU and 118.1 tokens/sec at eight vCPUs. A separate Proxmox/Xeon E5-2670 v3 result is reported around 55.4 tokens/sec.
+
+These are the upstream project's reported measurements, not independently verified results. They demonstrate that its implementation can scale across vCPUs and that its bare-metal KVM result is not evidence of a universal 50% improvement. They do not establish the expected performance of Qwen3.5-0.8B on a Ryzen 7 9700X.
+
+The reported prompt-prefill comparison is explicitly not apples-to-apples: the `llm.asm` path performs token-by-token GEMV for the prompt while llama.cpp uses batched GEMM. Do not use those prefill numbers to rank the engines. Re-run both systems with identical prompt token IDs, model size/quantization where possible, output length, thread count and timing boundaries before drawing conclusions.
